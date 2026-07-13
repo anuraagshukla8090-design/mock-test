@@ -1,0 +1,1085 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Question Viewer — Debug Tool</title>
+
+<!-- KaTeX -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<!-- marked.js -->
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+<!-- React 18 -->
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<!-- Babel -->
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --sidebar-w: 280px;
+  --header-h: 48px;
+  --nav-h: 56px;
+  --red:    #dc3545;
+  --green:  #198754;
+  --orange: #fd7e14;
+  --blue:   #0d6efd;
+  --gray:   #6c757d;
+  --light:  #f8f9fa;
+  --border: #dee2e6;
+  --mono: 'Consolas', 'Courier New', monospace;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  background: #f0f2f5;
+  color: #212529;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── HEADER ──────────────────────────────────────────────────── */
+.header {
+  height: var(--header-h);
+  background: #1a1a2e;
+  color: #e2e8f0;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 12px;
+  flex-shrink: 0;
+  z-index: 10;
+}
+.header h1 { font-size: 15px; font-weight: 600; letter-spacing: 0.3px; }
+.header .debug-badge {
+  background: #dc3545;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.5px;
+}
+.header .api-url {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+/* ── LAYOUT ──────────────────────────────────────────────────── */
+.layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ── SIDEBAR ─────────────────────────────────────────────────── */
+.sidebar {
+  width: var(--sidebar-w);
+  background: #fff;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.sidebar-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.sidebar-section h3 {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--gray);
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  font-size: 13px;
+}
+.stat-row .label { color: var(--gray); }
+.stat-row .value { font-weight: 600; }
+
+.meta-item {
+  font-size: 12px;
+  padding: 2px 0;
+  display: flex;
+  gap: 6px;
+}
+.meta-item .k { color: var(--gray); min-width: 70px; }
+.meta-item .v { font-weight: 500; font-family: var(--mono); word-break: break-all; }
+
+.sidebar-search {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 6px;
+}
+.sidebar-search input {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: 13px;
+  outline: none;
+}
+.sidebar-search input:focus { border-color: var(--blue); }
+.btn-sm {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  background: var(--light);
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-sm:hover { background: #e9ecef; }
+.btn-sm.primary { background: var(--blue); color: #fff; border-color: var(--blue); }
+.btn-sm.primary:hover { background: #0a58ca; }
+
+/* ── MAIN ─────────────────────────────────────────────────────── */
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.question-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ── QUESTION CARD ───────────────────────────────────────────── */
+.q-header {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 16px;
+}
+.q-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.q-number {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1a1a2e;
+}
+.q-source {
+  font-size: 12px;
+  color: var(--gray);
+  font-family: var(--mono);
+}
+
+.meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+}
+.meta-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.meta-field .mf-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--gray);
+}
+.meta-field .mf-value {
+  font-size: 13px;
+  font-weight: 500;
+}
+.meta-field .mf-value.missing {
+  color: var(--red);
+  font-style: italic;
+  font-weight: 400;
+}
+
+/* ── BADGES ──────────────────────────────────────────────────── */
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 12px;
+  letter-spacing: 0.3px;
+}
+.badge.green { background: #d1e7dd; color: #0a3622; }
+.badge.red   { background: #f8d7da; color: #58151c; }
+.badge.blue  { background: #cfe2ff; color: #084298; }
+.badge.orange{ background: #ffe5d0; color: #6f2f00; }
+.badge.gray  { background: #e9ecef; color: #495057; }
+
+/* ── STEM ────────────────────────────────────────────────────── */
+.section-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 16px;
+}
+.section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--gray);
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.stem-content { line-height: 1.7; font-size: 15px; }
+.stem-content p { margin-bottom: 0.6em; }
+.stem-content.missing-field {
+  color: var(--red);
+  font-style: italic;
+  padding: 8px;
+  background: #fff5f5;
+  border: 1px dashed var(--red);
+  border-radius: 4px;
+}
+
+/* ── OPTIONS ─────────────────────────────────────────────────── */
+.options-list { display: flex; flex-direction: column; gap: 6px; }
+.option-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.option-item.correct {
+  background: #d1e7dd;
+  border-color: #a3cfbb;
+}
+.option-item.correct .opt-key { color: var(--green); font-weight: 700; }
+.opt-key {
+  font-weight: 700;
+  min-width: 20px;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+.correct-tag {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--green);
+  background: #a3cfbb;
+  padding: 1px 6px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+/* ── IMAGES ──────────────────────────────────────────────────── */
+.img-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+.img-item { display: flex; flex-direction: column; gap: 4px; }
+.img-item img {
+  max-width: 400px;
+  max-height: 300px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #f8f9fa;
+}
+.img-item .img-label { font-size: 11px; color: var(--gray); font-family: var(--mono); }
+.img-item img.broken {
+  width: 200px; height: 100px;
+  display: flex; align-items: center; justify-content: center;
+  background: #fff5f5;
+  border: 1px dashed var(--red);
+}
+
+/* ── COLLAPSIBLE JSON ────────────────────────────────────────── */
+.collapsible-header {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+  font-size: 12px;
+  color: var(--gray);
+  padding: 4px 0;
+}
+.collapsible-header:hover { color: #495057; }
+.collapsible-arrow { font-size: 10px; transition: transform 0.15s; }
+.collapsible-arrow.open { transform: rotate(90deg); }
+.json-block {
+  margin-top: 10px;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 12px;
+  border-radius: 5px;
+  overflow-x: auto;
+  white-space: pre;
+  line-height: 1.5;
+  max-height: 400px;
+  overflow-y: auto;
+}
+.json-key   { color: #9cdcfe; }
+.json-str   { color: #ce9178; }
+.json-num   { color: #b5cea8; }
+.json-bool  { color: #569cd6; }
+.json-null  { color: #569cd6; }
+
+/* ── NAVIGATION ──────────────────────────────────────────────── */
+.nav-bar {
+  height: var(--nav-h);
+  background: #fff;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 0 16px;
+  flex-shrink: 0;
+}
+.nav-btn {
+  padding: 7px 16px;
+  border: 1px solid var(--border);
+  background: var(--light);
+  border-radius: 5px;
+  font-size: 13px;
+  cursor: pointer;
+  font-weight: 500;
+}
+.nav-btn:hover:not(:disabled) { background: #e9ecef; }
+.nav-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.nav-counter {
+  font-size: 14px;
+  font-weight: 600;
+  min-width: 80px;
+  text-align: center;
+}
+.nav-jump {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 16px;
+}
+.nav-jump label { font-size: 12px; color: var(--gray); }
+.nav-jump input {
+  width: 56px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: 13px;
+  text-align: center;
+  outline: none;
+}
+.nav-jump input:focus { border-color: var(--blue); }
+
+/* ── LOADING / ERROR ─────────────────────────────────────────── */
+.center-message {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--gray);
+  font-size: 15px;
+}
+.error-box {
+  background: #fff5f5;
+  border: 1px solid #ffb3b3;
+  border-radius: 6px;
+  padding: 12px 16px;
+  color: var(--red);
+  font-size: 13px;
+  font-family: var(--mono);
+}
+.missing-alert {
+  background: #fff5f5;
+  border-left: 3px solid var(--red);
+  padding: 8px 12px;
+  border-radius: 0 4px 4px 0;
+  font-size: 12px;
+  color: var(--red);
+}
+
+.loading-detail {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  color: var(--gray);
+}
+
+/* ── KATEX overrides ─────────────────────────────────────────── */
+.katex-display { overflow-x: auto; overflow-y: hidden; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const API = 'http://localhost:8000';
+
+// ── Rendered markdown + KaTeX ─────────────────────────────────
+function RenderedContent({ content, className }) {
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!ref.current || !content) return;
+    // marked renders markdown to HTML
+    ref.current.innerHTML = marked.parse(content, { breaks: true });
+    // KaTeX renders math
+    if (window.renderMathInElement) {
+      renderMathInElement(ref.current, {
+        delimiters: [
+          { left: '$$', right: '$$', display: true },
+          { left: '$',  right: '$',  display: false },
+          { left: '\\[', right: '\\]', display: true },
+          { left: '\\(', right: '\\)', display: false },
+        ],
+        throwOnError: false,
+      });
+    }
+  }, [content]);
+
+  return <div ref={ref} className={className} />;
+}
+
+// ── Syntax-highlighted JSON ───────────────────────────────────
+function JsonView({ data }) {
+  const json = JSON.stringify(data, null, 2);
+  const highlighted = json
+    .replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?)/g, (m) =>
+      m.endsWith(':')
+        ? `<span class="json-key">${m}</span>`
+        : `<span class="json-str">${m}</span>`
+    )
+    .replace(/\b(true|false)\b/g, '<span class="json-bool">$1</span>')
+    .replace(/\bnull\b/g, '<span class="json-null">null</span>')
+    .replace(/\b(\d+\.?\d*)\b/g, '<span class="json-num">$1</span>');
+  return (
+    <div
+      className="json-block"
+      dangerouslySetInnerHTML={{ __html: highlighted }}
+    />
+  );
+}
+
+// ── Collapsible section ───────────────────────────────────────
+function Collapsible({ title, children, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div>
+      <div className="collapsible-header" onClick={() => setOpen(o => !o)}>
+        <span className={`collapsible-arrow${open ? ' open' : ''}`}>▶</span>
+        <span>{title}</span>
+      </div>
+      {open && children}
+    </div>
+  );
+}
+
+// ── Missing field value ───────────────────────────────────────
+function FieldValue({ value, label }) {
+  if (value === null || value === undefined || value === '') {
+    return <span className="mf-value missing">⚠ Missing {label}</span>;
+  }
+  return <span className="mf-value">{String(value)}</span>;
+}
+
+// ── Badge helpers ─────────────────────────────────────────────
+function Badge({ color, children }) {
+  return <span className={`badge ${color}`}>{children}</span>;
+}
+
+function MetadataComplete({ q }) {
+  const required = ['exam_name', 'subject', 'chapter', 'topic', 'difficulty', 'question_type'];
+  const missing = required.filter(k => !q[k]);
+  if (missing.length === 0)
+    return <Badge color="green">✓ METADATA COMPLETE</Badge>;
+  return <Badge color="red">✗ MISSING: {missing.join(', ')}</Badge>;
+}
+
+// ── Sidebar ───────────────────────────────────────────────────
+function Sidebar({ questions, currentIdx, currentQ, stats, ingestion, onSearch }) {
+  const [searchVal, setSearchVal] = useState('');
+
+  const handleSearch = () => {
+    const num = parseInt(searchVal);
+    if (!isNaN(num)) onSearch(num);
+  };
+
+  return (
+    <div className="sidebar">
+      <div className="sidebar-scroll">
+
+        {/* Stats */}
+        <div className="sidebar-section">
+          <h3>Question Bank</h3>
+          <div className="stat-row">
+            <span className="label">Total</span>
+            <span className="value">{stats?.total ?? '—'}</span>
+          </div>
+          <div className="stat-row">
+            <span className="label">Viewing</span>
+            <span className="value">{currentIdx + 1} / {questions.length}</span>
+          </div>
+          {stats?.by_subject && Object.entries(stats.by_subject).map(([subj, cnt]) => (
+            <div key={subj} className="stat-row">
+              <span className="label">{subj}</span>
+              <span className="value">{cnt}</span>
+            </div>
+          ))}
+          {stats?.by_section_type && (
+            <>
+              <div className="stat-row">
+                <span className="label">MCQ</span>
+                <span className="value">{stats.by_section_type.mcq ?? 0}</span>
+              </div>
+              <div className="stat-row">
+                <span className="label">Integer</span>
+                <span className="value">{stats.by_section_type.integer ?? 0}</span>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Current question info */}
+        {currentQ && (
+          <div className="sidebar-section">
+            <h3>Current Question</h3>
+            <div className="meta-item">
+              <span className="k">Q ID</span>
+              <span className="v" title={currentQ.id}>{currentQ.id?.slice(0, 8)}…</span>
+            </div>
+            <div className="meta-item">
+              <span className="k">Q Num</span>
+              <span className="v">{currentQ.question_number ?? 'N/A'}</span>
+            </div>
+            <div className="meta-item">
+              <span className="k">Source</span>
+              <span className="v">{currentQ.source_pdf ?? '—'}</span>
+            </div>
+            <div className="meta-item">
+              <span className="k">Page</span>
+              <span className="v">{currentQ.source_page ?? '—'}</span>
+            </div>
+            <div className="meta-item">
+              <span className="k">Section</span>
+              <span className="v">{currentQ.section_label ?? currentQ.section_type}</span>
+            </div>
+            <div className="meta-item">
+              <span className="k">Ingestion</span>
+              <span className="v" title={currentQ.ingestion_id}>
+                {currentQ.ingestion_id?.slice(0, 8)}…
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Ingestion / Processing report */}
+        {ingestion && (
+          <div className="sidebar-section">
+            <h3>Ingestion Status</h3>
+            <div className="meta-item">
+              <span className="k">Status</span>
+              <span className="v" style={{
+                color: ingestion.status === 'SAVED' ? 'var(--green)' : 'var(--red)'
+              }}>
+                {ingestion.status}
+              </span>
+            </div>
+            {ingestion.processing_report && (() => {
+              const r = ingestion.processing_report;
+              return <>
+                <div className="meta-item">
+                  <span className="k">Detected</span>
+                  <span className="v">{r.questions_detected}</span>
+                </div>
+                <div className="meta-item">
+                  <span className="k">Stored</span>
+                  <span className="v">{r.questions_stored}</span>
+                </div>
+                <div className="meta-item">
+                  <span className="k">Images</span>
+                  <span className="v">{r.images_linked}</span>
+                </div>
+                <div className="meta-item">
+                  <span className="k">Time</span>
+                  <span className="v">{r.processing_time_s}s</span>
+                </div>
+                {r.warnings?.length > 0 && (
+                  <div className="meta-item" style={{ flexDirection: 'column', gap: 4 }}>
+                    <span className="k" style={{ color: 'var(--orange)' }}>
+                      ⚠ {r.warnings.length} warning{r.warnings.length !== 1 ? 's' : ''}
+                    </span>
+                    {r.warnings.slice(0, 3).map((w, i) => (
+                      <span key={i} className="v" style={{ fontSize: 11, color: 'var(--orange)' }}>
+                        {w}
+                      </span>
+                    ))}
+                    {r.warnings.length > 3 && (
+                      <span style={{ fontSize: 11, color: 'var(--gray)' }}>
+                        +{r.warnings.length - 3} more
+                      </span>
+                    )}
+                  </div>
+                )}
+              </>;
+            })()}
+          </div>
+        )}
+
+        {/* Difficulty breakdown */}
+        {stats?.by_difficulty && (
+          <div className="sidebar-section">
+            <h3>Difficulty</h3>
+            {Object.entries(stats.by_difficulty).map(([d, cnt]) => (
+              <div key={d} className="stat-row">
+                <span className="label">{d}</span>
+                <span className="value">{cnt}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+      </div>
+
+      {/* Search box */}
+      <div className="sidebar-search">
+        <input
+          type="number"
+          placeholder="Jump to Q#"
+          value={searchVal}
+          onChange={e => setSearchVal(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && handleSearch()}
+        />
+        <button className="btn-sm primary" onClick={handleSearch}>Go</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Question Detail ───────────────────────────────────────────
+function QuestionDetail({ q, loading }) {
+  const [rawOpen, setRawOpen] = useState(false);
+
+  if (loading) {
+    return <div className="loading-detail">Loading question…</div>;
+  }
+  if (!q) return null;
+
+  // Determine which required fields are missing
+  const requiredFields = {
+    exam_name: 'Exam Name',
+    subject: 'Subject',
+    chapter: 'Chapter',
+    topic: 'Topic',
+    difficulty: 'Difficulty',
+    question_type: 'Question Type',
+    answer: 'Answer',
+    stem_md: 'Question Stem',
+  };
+  const missingFields = Object.entries(requiredFields)
+    .filter(([k]) => !q[k])
+    .map(([, v]) => v);
+
+  const hasMetadata = ['exam_name', 'chapter', 'topic', 'difficulty', 'question_type']
+    .every(k => q[k]);
+
+  const ANSWER_MAP = { '1': 'A', '2': 'B', '3': 'C', '4': 'D' };
+  const normAnswer = ANSWER_MAP[q.answer] || q.answer;
+
+  return (
+    <>
+      {/* ── Q Header ──────────────────────────────────────────── */}
+      <div className="q-header">
+        <div className="q-title-row">
+          <span className="q-number">Q{q.question_number ?? '?'}</span>
+          <span className="q-source">{q.source_pdf}</span>
+          {q.section_label && (
+            <Badge color="gray">{q.section_label}</Badge>
+          )}
+          <Badge color={q.section_type === 'mcq' ? 'blue' : 'orange'}>
+            {q.section_type?.toUpperCase()}
+          </Badge>
+          <Badge color={q.status === 'active' ? 'green' : 'gray'}>
+            {q.status?.toUpperCase()}
+          </Badge>
+        </div>
+
+        {/* Metadata grid */}
+        <div className="meta-grid">
+          {[
+            ['Exam',       'exam_name'],
+            ['Subject',    'subject'],
+            ['Chapter',    'chapter'],
+            ['Topic',      'topic'],
+            ['Subtopic',   'subtopic'],
+            ['Difficulty', 'difficulty'],
+            ['Type',       'question_type'],
+          ].map(([label, key]) => (
+            <div key={key} className="meta-field">
+              <span className="mf-label">{label}</span>
+              <FieldValue value={q[key]} label={label} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Badges ────────────────────────────────────────────── */}
+      <div className="badges" style={{ padding: '0 2px' }}>
+        <MetadataComplete q={q} />
+        {q.has_diagram
+          ? <Badge color="blue">📐 Has Diagram</Badge>
+          : <Badge color="gray">No Diagram</Badge>}
+        {q.has_formula
+          ? <Badge color="blue">∑ Has Formula</Badge>
+          : <Badge color="gray">No Formula</Badge>}
+        {q.images?.length > 0
+          ? <Badge color="green">{q.images.length} Image{q.images.length !== 1 ? 's' : ''} Linked</Badge>
+          : <Badge color="gray">No Images</Badge>}
+        {q.concepts?.length > 0 && (
+          <Badge color="blue">{q.concepts.length} Concepts</Badge>
+        )}
+      </div>
+
+      {/* ── Missing field alert ────────────────────────────────── */}
+      {missingFields.length > 0 && (
+        <div className="missing-alert">
+          <strong>Missing fields:</strong> {missingFields.join(' · ')}
+        </div>
+      )}
+
+      {/* ── Stem ──────────────────────────────────────────────── */}
+      <div className="section-card">
+        <div className="section-title">Question Stem</div>
+        {q.stem_md
+          ? <RenderedContent content={q.stem_md} className="stem-content" />
+          : <div className="stem-content missing-field">⚠ Stem is missing or empty</div>
+        }
+      </div>
+
+      {/* ── Images ────────────────────────────────────────────── */}
+      {q.images?.length > 0 && (
+        <div className="section-card">
+          <div className="section-title">Images / Diagrams</div>
+          <div className="img-grid">
+            {q.images.map((img, i) => (
+              <div key={i} className="img-item">
+                <img
+                  src={`${API}/api/images/${img.filename}`}
+                  alt={img.filename}
+                  onError={e => {
+                    e.target.style.display = 'none';
+                    e.target.nextSibling.style.display = 'block';
+                  }}
+                />
+                <div
+                  style={{
+                    display: 'none',
+                    padding: '12px',
+                    background: '#fff5f5',
+                    border: '1px dashed var(--red)',
+                    borderRadius: 4,
+                    color: 'var(--red)',
+                    fontSize: 12
+                  }}
+                >
+                  ⚠ Image not found: {img.filename}
+                </div>
+                <span className="img-label">
+                  {img.filename} · {img.position || 'stem'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Options ───────────────────────────────────────────── */}
+      {q.section_type === 'mcq' ? (
+        <div className="section-card">
+          <div className="section-title">
+            Options — Answer: <strong style={{ color: 'var(--green)' }}>
+              {normAnswer || <span style={{ color: 'var(--red)' }}>MISSING</span>}
+            </strong>
+          </div>
+          {Object.keys(q.options || {}).length === 0 ? (
+            <div style={{ color: 'var(--red)', fontStyle: 'italic', fontSize: 13 }}>
+              ⚠ Options not extracted
+            </div>
+          ) : (
+            <div className="options-list">
+              {Object.entries(q.options).map(([key, val]) => {
+                const isCorrect = key === normAnswer;
+                return (
+                  <div key={key} className={`option-item${isCorrect ? ' correct' : ''}`}>
+                    <span className="opt-key">({key})</span>
+                    <RenderedContent
+                      content={val}
+                      className="stem-content"
+                      style={{ flex: 1 }}
+                    />
+                    {isCorrect && <span className="correct-tag">✓ ANSWER</span>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="section-card">
+          <div className="section-title">Integer Answer</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--green)', fontFamily: 'var(--mono)' }}>
+            {q.answer || <span style={{ color: 'var(--red)' }}>⚠ MISSING</span>}
+          </div>
+        </div>
+      )}
+
+      {/* ── Concepts ──────────────────────────────────────────── */}
+      {q.concepts?.length > 0 && (
+        <div className="section-card">
+          <div className="section-title">Key Concepts</div>
+          <div className="badges">
+            {q.concepts.map((c, i) => (
+              <Badge key={i} color="gray">{c}</Badge>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Raw JSON ──────────────────────────────────────────── */}
+      <div className="section-card">
+        <Collapsible title="Raw Question JSON (full API response)">
+          <JsonView data={q} />
+        </Collapsible>
+        {q.llm_raw_response && Object.keys(q.llm_raw_response).length > 0 && (
+          <div style={{ marginTop: 10 }}>
+            <Collapsible title="LLM Raw Response (stored metadata JSON)">
+              <JsonView data={q.llm_raw_response} />
+            </Collapsible>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ── App ───────────────────────────────────────────────────────
+function App() {
+  const [questions, setQuestions]       = useState([]);
+  const [currentIdx, setCurrentIdx]     = useState(0);
+  const [currentQ, setCurrentQ]         = useState(null);
+  const [loadingQ, setLoadingQ]         = useState(false);
+  const [stats, setStats]               = useState(null);
+  const [ingestionCache, setIngCache]   = useState({});
+  const [error, setError]               = useState(null);
+  const [jumpValue, setJumpValue]       = useState('');
+  const [apiUrl]                        = useState(API);
+
+  // Load questions list + stats on mount
+  useEffect(() => {
+    const base = apiUrl;
+    Promise.all([
+      fetch(`${base}/api/questions?limit=200&status=active`)
+        .then(r => { if (!r.ok) throw new Error(`API ${r.status}: ${r.url}`); return r.json(); }),
+      fetch(`${base}/api/questions/stats`)
+        .then(r => r.json()),
+    ])
+    .then(([qs, s]) => {
+      // Sort by question_number, then by subject for consistent ordering
+      qs.sort((a, b) => {
+        const na = a.question_number ?? 9999;
+        const nb = b.question_number ?? 9999;
+        return na !== nb ? na - nb : (a.subject || '').localeCompare(b.subject || '');
+      });
+      setQuestions(qs);
+      setStats(s);
+    })
+    .catch(e => setError(`Failed to connect to API at ${base}. Is the server running?\n\n${e.message}`));
+  }, [apiUrl]);
+
+  // Fetch full question detail when index changes
+  useEffect(() => {
+    if (!questions.length) return;
+    const q = questions[currentIdx];
+    if (!q) return;
+
+    setLoadingQ(true);
+    setCurrentQ(null);
+    fetch(`${apiUrl}/api/questions/${q.id}`)
+      .then(r => r.json())
+      .then(fullQ => {
+        setCurrentQ(fullQ);
+        // Fetch ingestion if not already cached
+        if (fullQ.ingestion_id && !ingestionCache[fullQ.ingestion_id]) {
+          return fetch(`${apiUrl}/api/ingestion/${fullQ.ingestion_id}/status`)
+            .then(r => r.json())
+            .then(ing => {
+              setIngCache(prev => ({ ...prev, [fullQ.ingestion_id]: ing }));
+            })
+            .catch(() => {}); // Non-fatal
+        }
+      })
+      .catch(e => setError(e.message))
+      .finally(() => setLoadingQ(false));
+  }, [currentIdx, questions, apiUrl]);
+
+  const goTo = useCallback((idx) => {
+    const clamped = Math.max(0, Math.min(questions.length - 1, idx));
+    setCurrentIdx(clamped);
+  }, [questions.length]);
+
+  const handleSearch = useCallback((qNum) => {
+    const idx = questions.findIndex(q => q.question_number === qNum);
+    if (idx >= 0) goTo(idx);
+    else alert(`Question #${qNum} not found in current list`);
+  }, [questions, goTo]);
+
+  const handleJump = () => {
+    const n = parseInt(jumpValue);
+    if (!isNaN(n)) goTo(n - 1); // 1-based input
+  };
+
+  const ingestion = currentQ ? ingestionCache[currentQ.ingestion_id] : null;
+
+  if (error) {
+    return (
+      <>
+        <div className="header">
+          <h1>Question Viewer</h1>
+          <span className="debug-badge">DEBUG</span>
+        </div>
+        <div className="center-message">
+          <div className="error-box" style={{ maxWidth: 500 }}>
+            {error.split('\n').map((l, i) => <div key={i}>{l || <br />}</div>)}
+            <div style={{ marginTop: 12, fontSize: 11, color: '#666' }}>
+              Make sure the API server is running:<br />
+              <code>.venv\Scripts\uvicorn app.main:app --reload</code>
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  if (!questions.length && !error) {
+    return (
+      <>
+        <div className="header"><h1>Question Viewer</h1></div>
+        <div className="center-message">Loading questions from API…</div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      {/* Header */}
+      <div className="header">
+        <h1>Question Viewer</h1>
+        <span className="debug-badge">DEBUG</span>
+        <span style={{ color: '#64748b', fontSize: 12 }}>
+          {questions.length} questions loaded
+        </span>
+        <span className="api-url">{apiUrl}</span>
+      </div>
+
+      {/* Main layout */}
+      <div className="layout">
+        <Sidebar
+          questions={questions}
+          currentIdx={currentIdx}
+          currentQ={currentQ}
+          stats={stats}
+          ingestion={ingestion}
+          onSearch={handleSearch}
+        />
+
+        <div className="main">
+          <div className="question-area">
+            <QuestionDetail q={currentQ} loading={loadingQ} />
+          </div>
+
+          {/* Navigation bar */}
+          <div className="nav-bar">
+            <button
+              className="nav-btn"
+              disabled={currentIdx === 0}
+              onClick={() => goTo(currentIdx - 1)}
+            >
+              ← Prev
+            </button>
+
+            <span className="nav-counter">
+              {currentIdx + 1} / {questions.length}
+            </span>
+
+            <button
+              className="nav-btn"
+              disabled={currentIdx >= questions.length - 1}
+              onClick={() => goTo(currentIdx + 1)}
+            >
+              Next →
+            </button>
+
+            <div className="nav-jump">
+              <label>Go to:</label>
+              <input
+                type="number"
+                min="1"
+                max={questions.length}
+                value={jumpValue}
+                placeholder="#"
+                onChange={e => setJumpValue(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleJump()}
+              />
+              <button className="btn-sm primary" onClick={handleJump}>Go</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
