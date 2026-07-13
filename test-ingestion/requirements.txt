@@ -1,0 +1,19 @@
+# ============================================================
+# MinerU (Magic-PDF) Evaluation PoC — Requirements
+# Python 3.10 recommended (3.10 - 3.13 supported)
+# ============================================================
+
+# ── Core MinerU / Magic-PDF ──────────────────────────────────
+# Install the full CPU variant (includes layout model weights).
+# Switch to magic-pdf[full] if you have a CUDA GPU.
+magic-pdf[full]
+
+# ── Report / Evaluation helpers ─────────────────────────────
+rich>=13.0          # pretty terminal tables & progress bars
+Pillow>=10.0        # image introspection (size, mode)
+PyMuPDF>=1.23       # open PDFs to count pages / inspect pages
+tabulate>=0.9       # ascii table export inside reports
+opencv-python-headless>=4.0  # Required by magic-pdf batch analyze
+ultralytics>=8.0.0  # Required by magic-pdf language detection
+doclayout-yolo      # Required by magic-pdf doclayout
+rapid-table         # Required by magic-pdf table parsing

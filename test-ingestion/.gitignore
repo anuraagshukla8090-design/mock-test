@@ -1,0 +1,9 @@
+.venv/
+.venv310/
+python310/
+magic-pdf-models/
+output/
+input/
+__pycache__/
+*.log
+*.exe
