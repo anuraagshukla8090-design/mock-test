@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ChevronLeft, ChevronRight, BookOpen, Tag, BarChart2,
   Hash, Layers, Zap, Image, FunctionSquare, CheckCircle2,
   XCircle, Circle, Bookmark, ExternalLink, Loader2, AlertCircle,
-  GraduationCap, FlaskConical,
+  GraduationCap, FlaskConical, Trash2,
 } from 'lucide-react'
-import { getQuestions, getQuestion } from '../api/questions'
+import { getQuestions, getQuestion, deleteQuestion } from '../api/questions'
 import type { QuestionDetail, QuestionFilters } from '../types/question'
 import RenderedContent from '../components/question/RenderedContent'
 
@@ -108,6 +108,7 @@ function Option({
 export default function TestView() {
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
 
   // ── Filters from URL (same as QuestionBank so links carry over) ──
   const filters: QuestionFilters = {
@@ -173,6 +174,24 @@ export default function TestView() {
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [idx, goTo])
+
+  // Delete question mutation
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteQuestion(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['questions-list-for-testview'] })
+      queryClient.invalidateQueries({ queryKey: ['questions'] })
+      // Move to next question (or previous if at end)
+      const nextIdx = idx > 0 ? idx - 1 : 0
+      setIdx(nextIdx)
+    },
+  })
+
+  const handleDeleteQuestion = () => {
+    if (!question) return
+    if (!window.confirm(`Delete question Q${question.question_number ?? idx + 1}?\n\nThis is permanent and cannot be undone.`)) return
+    deleteMutation.mutate(question.id)
+  }
 
   const isMCQ = question?.section_type === 'mcq'
   const optionEntries = Object.entries(question?.options ?? {})
@@ -517,6 +536,27 @@ export default function TestView() {
                     {question.source_pdf.split('/').pop() ?? question.source_pdf}
                   </p>
                 </div>
+              )}
+            </div>
+
+            {/* ── Delete question button ───────────────────────── */}
+            <div className="px-4 py-4 border-t border-gray-200">
+              <button
+                onClick={handleDeleteQuestion}
+                disabled={deleteMutation.isPending}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg
+                  border border-red-200 text-red-500 text-xs font-medium
+                  hover:bg-red-50 hover:border-red-400 hover:text-red-600
+                  disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                title="Permanently delete this question"
+              >
+                {deleteMutation.isPending
+                  ? <Loader2 size={13} className="animate-spin" />
+                  : <Trash2 size={13} />}
+                Delete Question
+              </button>
+              {deleteMutation.isError && (
+                <p className="text-[11px] text-red-500 mt-1.5 text-center">Delete failed. Try again.</p>
               )}
             </div>
 

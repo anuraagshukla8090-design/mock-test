@@ -150,7 +150,7 @@ class InlineAnswerBuilder(AbstractBuilder):
         # Collect blocks by type
         text_blocks = [b for b in blocks if b.get("type") == "text"]
         equation_blocks = [b for b in blocks if b.get("type") == "equation"]
-        image_blocks = [b for b in blocks if b.get("type") == "image"]
+        image_blocks = [b for b in blocks if b.get("type") in ("image", "table") and b.get("img_path")]
 
         # ── Extract answer ────────────────────────────────────────────────────
         answer: str | None = None

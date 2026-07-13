@@ -46,7 +46,7 @@ Return this JSON object with values filled in for THIS specific question:
 {{
   "chapter": "<standard NCERT {subject} chapter name>",
   "topic": "<specific topic within that chapter>",
-  "subtopic": "<narrow subtopic, or null>",
+  "subtopic": "<narrow subtopic — REQUIRED, never null>",
   "difficulty": "<easy|medium|hard relative to {exam_name} level>",
   "question_type": "<conceptual|numerical|assertion_reason|match_the_following|statement_based>",
   "concepts": ["<concept 1>", "<concept 2>"],
@@ -57,7 +57,7 @@ Return this JSON object with values filled in for THIS specific question:
 Rules:
 - chapter: MUST be a real NCERT {subject} chapter name (e.g. for physics: "Kinematics", "Laws of Motion", "Work, Energy and Power", "Rotational Motion", "Gravitation", "Thermal Properties of Matter", "Thermodynamics", "Oscillations", "Waves", "Electric Charges and Fields", "Electrostatic Potential and Capacitance", "Current Electricity", "Moving Charges and Magnetism", "Electromagnetic Induction", "Alternating Current", "Ray Optics and Optical Instruments", "Wave Optics", "Dual Nature of Radiation and Matter", "Atoms", "Nuclei", "Semiconductor Electronics")
 - topic: specific topic within the chapter (never null)
-- subtopic: narrow subtopic, or null if not clearly identifiable
+- subtopic: REQUIRED. Narrow subtopic within the topic. If no distinct subtopic exists, use the topic value itself. Never null.
 - difficulty: easy/medium/hard relative to {exam_name} level
 - question_type: one of the listed types
 - concepts: 2 to 5 key concepts tested
@@ -84,7 +84,7 @@ Return this JSON object with values filled in for THIS specific question:
   "subject": "<physics|chemistry|mathematics|biology>",
   "chapter": "<standard NCERT chapter name for that subject>",
   "topic": "<specific topic within that chapter>",
-  "subtopic": "<narrow subtopic, or null>",
+  "subtopic": "<narrow subtopic — REQUIRED, never null>",
   "difficulty": "<easy|medium|hard relative to {exam_name} level>",
   "question_type": "<conceptual|numerical|assertion_reason|match_the_following|statement_based>",
   "concepts": ["<concept 1>", "<concept 2>"],
@@ -96,7 +96,7 @@ Rules:
 - subject: identify from question content — physics (mechanics, optics, thermodynamics, electricity, magnetism, modern physics), chemistry (organic, inorganic, physical), mathematics (algebra, calculus, coordinate geometry, vectors, probability)
 - chapter: standard NCERT chapter name for that subject
 - topic: specific topic within the chapter (never null)
-- subtopic: narrow subtopic, or null if not clearly identifiable
+- subtopic: REQUIRED. Narrow subtopic within the topic. If no distinct subtopic exists, use the topic value itself. Never null.
 - difficulty: easy/medium/hard relative to {exam_name} level
 - question_type: one of the listed types
 - concepts: 2 to 5 key concepts tested

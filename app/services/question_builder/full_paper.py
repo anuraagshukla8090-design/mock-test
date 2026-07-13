@@ -157,6 +157,7 @@ class _SegmentResult:
     body: list[_PreparedBlock]
     answer_key: list[_PreparedBlock]
     boundary_source_index: int | None
+    key_img_path: str | None = None  # Set when the key is an image block (LayoutLMv3 mode)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -195,12 +196,17 @@ class FullPaperBuilder(AbstractBuilder):
         body_blocks = [item.block for item in segment.body]
         key_blocks = [item.block for item in segment.answer_key]
         key_boundary_warning: str | None = None
-        if not key_blocks:
+        if not key_blocks and not segment.key_img_path:
             key_boundary_warning = (
                 "answer-key boundary not found in MinerU text; the answer-key page "
                 "may have been emitted as an image block"
             )
             self.stage_warnings.append(key_boundary_warning)
+        elif not key_blocks and segment.key_img_path:
+            logger.info(
+                "FullPaperBuilder: answer key is an image block — will run OCR fallback on %s",
+                segment.key_img_path,
+            )
 
         # Stage 3: Group body blocks into per-question buckets
         raw_questions = _group_into_questions(body_blocks)
@@ -229,6 +235,24 @@ class FullPaperBuilder(AbstractBuilder):
 
         # Stage 5: Parse answer key and merge into questions
         answer_map = _parse_answer_key(key_blocks)
+
+        # Stage 5b: OCR fallback — triggered when LayoutLMv3 emits the answer key
+        # page as a type=table or type=image block with no text/html (only img_path).
+        if not answer_map and segment.key_img_path:
+            logger.info("FullPaperBuilder: running OCR fallback on answer key image")
+            try:
+                from app.services.mineru_runner import run_ocr_on_image
+                ocr_text = run_ocr_on_image(self.images_dir / Path(segment.key_img_path).name)
+                if ocr_text:
+                    answer_map = _parse_answer_key_from_text(ocr_text)
+                    logger.info(
+                        "FullPaperBuilder: OCR fallback extracted %d answers", len(answer_map)
+                    )
+                else:
+                    logger.warning("FullPaperBuilder: OCR fallback returned empty text")
+            except Exception as _ocr_exc:
+                logger.warning("FullPaperBuilder: OCR fallback failed: %s", _ocr_exc)
+
         logger.info("FullPaperBuilder: %d answers in key", len(answer_map))
 
         _merge_answers(questions, answer_map)
@@ -332,21 +356,29 @@ def _filter_blocks(blocks: list[dict]) -> _FilterResult:
 
 def _segment_blocks(blocks: list[_PreparedBlock]) -> _SegmentResult:
     """Split filtered blocks at the first deterministic answer-key boundary."""
-    boundary = _find_answer_key_boundary([item.block for item in blocks])
+    boundary, key_img_path = _find_answer_key_boundary([item.block for item in blocks])
     return _SegmentResult(
         body=blocks[:boundary],
         answer_key=blocks[boundary:],
         boundary_source_index=(
             blocks[boundary].source_index if boundary < len(blocks) else None
         ),
+        key_img_path=key_img_path,
     )
 
 
-def _find_answer_key_boundary(blocks: list[dict]) -> int:
+def _find_answer_key_boundary(blocks: list[dict]) -> tuple[int, str | None]:
     """
     Scan backwards for the first answer-key section header.
     Falls back to density detection (3+ N.(x) entries in one block) in the last 15%.
-    Returns len(blocks) if no key is found (all blocks treated as body).
+
+    Returns:
+        (boundary_index, key_img_path)
+        - boundary_index: index into blocks where answer key starts.
+          len(blocks) means no text-based key found.
+        - key_img_path: relative img_path string if the key was found as a
+          type=table or type=image block with no text (LayoutLMv3 mode).
+          None if the key was found as parseable text blocks.
     """
     for i in range(len(blocks) - 1, -1, -1):
         b = blocks[i]
@@ -360,7 +392,7 @@ def _find_answer_key_boundary(blocks: list[dict]) -> int:
                 "FullPaperBuilder: answer key header at block %d: %r",
                 i, clean_text[:60],
             )
-            return i
+            return i, None
 
     # Fallback: dense cluster of answer entries in the tail
     tail_start = int(len(blocks) * 0.85)
@@ -373,12 +405,30 @@ def _find_answer_key_boundary(blocks: list[dict]) -> int:
         clean_text = re.sub(r"<[^>]+>", " ", text_content)
         if len(_ANS_ENTRY_RE.findall(clean_text)) >= 3:
             logger.info("FullPaperBuilder: answer key detected by density at block %d", i)
-            return i
+            return i, None
+
+    # ── LayoutLMv3 image fallback ─────────────────────────────────────────────
+    # LayoutLMv3 often emits the answer key page as a type=table block with
+    # only img_path (no text/html), or as a bare type=image on the last page.
+    # Scan the last 5 blocks for such a candidate.
+    for i in range(len(blocks) - 1, max(len(blocks) - 6, -1), -1):
+        b = blocks[i]
+        btype = b.get("type")
+        img_path = b.get("img_path", "")
+        if not img_path:
+            continue
+        text_content = (b.get("text", "") or b.get("html", "") or "").strip()
+        if btype in ("table", "image") and not text_content:
+            logger.info(
+                "FullPaperBuilder: answer key detected as image block at index %d: %s",
+                i, img_path,
+            )
+            return i, img_path
 
     logger.warning(
         "FullPaperBuilder: no answer key section found — questions will have answer=None"
     )
-    return len(blocks)
+    return len(blocks), None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -405,7 +455,7 @@ def _group_into_questions(blocks: list[dict]) -> list[_RawQuestion]:
         text  = block.get("text", "").strip()
 
         # Always forward non-text blocks to the current question
-        if btype in ("image", "equation"):
+        if btype in ("image", "equation") or (btype == "table" and block.get("img_path")):
             if current is not None:
                 current.blocks.append(block)
             continue
@@ -494,7 +544,7 @@ def _build_question(rq: _RawQuestion, images_dir: Path) -> Question | None:
         btype = block.get("type", "")
 
         # ── Image blocks ──────────────────────────────────────────────────────
-        if btype == "image":
+        if btype == "image" or (btype == "table" and block.get("img_path")):
             image_blocks.append(block)
             continue
 
@@ -788,6 +838,27 @@ def _parse_answer_key(key_blocks: list[dict]) -> dict[int, str]:
             raw   = raw_ans.strip()
             if q_num not in answer_map and raw:
                 answer_map[q_num] = raw
+    return answer_map
+
+
+def _parse_answer_key_from_text(text: str) -> dict[int, str]:
+    """
+    Parse a raw OCR text string (not a list of blocks) using the same
+    _ANS_ENTRY_RE pattern used by _parse_answer_key().
+
+    Called by the OCR fallback path when the answer key was emitted as an
+    image by LayoutLMv3 and PaddleOCR returns a flat string like:
+      "1.(4) 2.(3) 3.(2) ... 75.(20)"
+
+    Returns {question_number: raw_answer_string} identical in shape to
+    _parse_answer_key().
+    """
+    answer_map: dict[int, str] = {}
+    for q_str, raw_ans in _ANS_ENTRY_RE.findall(text):
+        q_num = int(q_str)
+        raw = raw_ans.strip()
+        if q_num not in answer_map and raw:
+            answer_map[q_num] = raw
     return answer_map
 
 

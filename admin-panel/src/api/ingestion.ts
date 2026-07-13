@@ -17,3 +17,6 @@ export const uploadPdf = (formData: FormData) =>
 
 export const retryIngestion = (id: string) =>
   api.post<IngestionDetail>(`/ingestion/${id}/retry`).then((r) => r.data)
+
+export const deleteIngestion = (id: string) =>
+  api.delete(`/ingestion/${id}`)

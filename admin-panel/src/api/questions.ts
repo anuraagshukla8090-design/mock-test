@@ -27,3 +27,7 @@ export const updateMetadata = (id: string, data: MetadataUpdate) =>
 
 export const updateStatus = (id: string, newStatus: string) =>
   api.patch<QuestionDetail>(`/questions/${id}/status`, null, { params: { new_status: newStatus } }).then((r) => r.data)
+
+export const deleteQuestion = (id: string) =>
+  api.delete(`/questions/${id}`)
+

@@ -58,6 +58,7 @@ Rules:
   * "between" = from chapter_from to chapter_to, both inclusive ("from X to Y")
   * "exact"   = one specific chapter only ("only from X", "just X")
   * "all"     = no chapter filter (use when no chapter is mentioned)
+- IMPORTANT: If the teacher does NOT mention a specific chapter name, ALWAYS use chapter_filter_mode="all". Never use "upto", "from", "exact", "after", or "between" unless the teacher explicitly names a chapter.
 - Set ONLY the chapter field that matches the mode. All others must be null.
 - exclude_chapters: list of chapter names to exclude (e.g. ["Kinematics"])
 - question_count: integer 1-200. Default 30.
@@ -104,6 +105,23 @@ class NaturalQueryParser:
             raw["exam_name"] = normalize_exam_name(str(raw["exam_name"])) or raw["exam_name"]
         if "subject" in raw and raw["subject"]:
             raw["subject"] = normalize_subject(str(raw["subject"])) or raw["subject"]
+
+        # Defensive normalization: if the LLM set a chapter_filter_mode but
+        # forgot to fill the companion field, fall back to "all" so Pydantic
+        # validation never sees an inconsistent state.
+        mode = raw.get("chapter_filter_mode", "all")
+        _companion = {
+            "upto":    "chapter_upto",
+            "exact":   "chapter",
+            "from":    "chapter_from",
+            "after":   "chapter_after",
+            "between": "chapter_from",  # between needs both; check from only
+        }
+        if mode in _companion:
+            companion_key = _companion[mode]
+            companion_val = raw.get(companion_key)
+            if not companion_val or str(companion_val).strip().lower() in ("null", "none", ""):
+                raw["chapter_filter_mode"] = "all"
 
         # Validate and coerce via Pydantic
         try:

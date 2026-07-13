@@ -147,3 +147,21 @@ def update_status(
     db.commit()
     db.refresh(q)
     return q
+
+
+@router.delete("/{question_id}", status_code=204)
+def delete_question(
+    question_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    """
+    Hard-delete a single question.
+    Also removes any PaperQuestion join records referencing it (CASCADE).
+    This is irreversible.
+    """
+    q = db.get(Question, question_id)
+    if not q:
+        raise HTTPException(404, f"Question {question_id} not found.")
+    db.delete(q)
+    db.commit()
+

@@ -114,3 +114,61 @@ def run_mineru(pdf_path: Path, output_dir: Path) -> MineruOutput:
         output_dir=result_dir,
         page_count=page_count,
     )
+
+
+def run_ocr_on_image(img_path: Path) -> str:
+    """
+    Run MinerU's bundled PaddleOCR on a single image file via subprocess.
+
+    Called by FullPaperBuilder when LayoutLMv3 emits the answer key page as a
+    plain image (type=table/image with only img_path, no text/html).
+
+    Uses the .venv310 Python interpreter configured in settings.mineru_python —
+    the same environment that has magic_pdf and its OCR weights installed.
+
+    Args:
+        img_path: Absolute path to the image file.
+
+    Returns:
+        Raw OCR text string (joined fragments), or "" on failure.
+
+    Raises:
+        Never raises — always returns empty string on error so the calling
+        builder can fall back to answer=None gracefully.
+    """
+    ocr_script = Path(settings.mineru_script).parent / "ocr_answer_key.py"
+    if not ocr_script.exists():
+        import logging
+        logging.getLogger(__name__).warning(
+            "ocr_answer_key.py not found at %s — skipping OCR fallback", ocr_script
+        )
+        return ""
+
+    try:
+        cmd = [
+            settings.mineru_python,
+            str(ocr_script),
+            "--image", str(img_path),
+        ]
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            import logging
+            logging.getLogger(__name__).warning(
+                "OCR fallback failed (exit %d): %s", result.returncode, result.stderr[-500:]
+            )
+            return ""
+
+        import json as _json
+        data = _json.loads(result.stdout.strip())
+        return data.get("text", "")
+
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("OCR fallback error: %s", exc)
+        return ""
+

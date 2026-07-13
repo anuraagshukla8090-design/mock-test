@@ -147,3 +147,41 @@ async def retry_ingestion(
         pdf_path=pdf_path,
     )
     return ingestion
+
+
+@router.delete("/{ingestion_id}", status_code=204)
+def delete_ingestion(
+    ingestion_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    """
+    Hard-delete an ingestion and ALL its associated data:
+    - All questions extracted from this PDF (CASCADE via FK, but explicit here)
+    - The ingestion DB record
+    - The uploaded PDF file from storage/uploads/
+    - The MinerU output directory from storage/mineru_outputs/
+
+    This is irreversible.
+    """
+    from app.models.question import Question
+
+    ingestion = db.get(Ingestion, ingestion_id)
+    if not ingestion:
+        raise HTTPException(404, f"Ingestion {ingestion_id} not found.")
+
+    # Delete all questions from this ingestion first
+    db.query(Question).filter(Question.ingestion_id == ingestion_id).delete()
+
+    # Delete the ingestion record (CASCADE handles PaperQuestion refs)
+    db.delete(ingestion)
+    db.commit()
+
+    # Clean up files (best-effort — don't fail if already missing)
+    import shutil
+    pdf_path = Path(settings.storage_dir) / "uploads" / f"{ingestion_id}.pdf"
+    if pdf_path.exists():
+        pdf_path.unlink()
+
+    mineru_dir = Path(settings.storage_dir) / "mineru_outputs" / str(ingestion_id)
+    if mineru_dir.exists():
+        shutil.rmtree(mineru_dir, ignore_errors=True)

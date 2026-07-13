@@ -1,16 +1,31 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { getIngestions } from '../api/ingestion'
+import { getIngestions, deleteIngestion } from '../api/ingestion'
 import { StatusBadge } from '../components/ui/Badge'
 import { PageSpinner } from '../components/ui/Spinner'
 import ErrorAlert from '../components/ui/ErrorAlert'
+import { Trash2 } from 'lucide-react'
 
 export default function Ingestions() {
+  const queryClient = useQueryClient()
+
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['ingestions'],
     queryFn: () => getIngestions(0, 100),
     refetchInterval: 10000,
   })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteIngestion(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ingestions'] })
+    },
+  })
+
+  const handleDelete = (id: string, filename: string) => {
+    if (!window.confirm(`Delete "${filename}"?\n\nThis will permanently remove the ingestion record and ALL associated questions. This cannot be undone.`)) return
+    deleteMutation.mutate(id)
+  }
 
   if (isLoading) return <PageSpinner />
   if (isError) return <div className="p-8"><ErrorAlert message="Failed to load ingestions" detail={String(error)} /></div>
@@ -29,6 +44,12 @@ export default function Ingestions() {
           + Upload PDF
         </Link>
       </div>
+
+      {deleteMutation.isError && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+          Delete failed. Please try again.
+        </div>
+      )}
 
       <div className="bg-white border border-gray-200 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
@@ -59,9 +80,19 @@ export default function Ingestions() {
                   {new Date(ing.created_at).toLocaleDateString()}
                 </td>
                 <td className="px-4 py-3">
-                  <Link to={`/ingestions/${ing.id}`} className="text-indigo-600 text-xs hover:underline">
-                    View →
-                  </Link>
+                  <div className="flex items-center gap-3">
+                    <Link to={`/ingestions/${ing.id}`} className="text-indigo-600 text-xs hover:underline">
+                      View →
+                    </Link>
+                    <button
+                      onClick={() => handleDelete(ing.id, ing.filename)}
+                      disabled={deleteMutation.isPending}
+                      className="text-red-400 hover:text-red-600 transition-colors disabled:opacity-40"
+                      title="Delete this ingestion and all its questions"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
