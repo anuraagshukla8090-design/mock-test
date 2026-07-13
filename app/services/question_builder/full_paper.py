@@ -350,12 +350,15 @@ def _find_answer_key_boundary(blocks: list[dict]) -> int:
     """
     for i in range(len(blocks) - 1, -1, -1):
         b = blocks[i]
-        if b.get("type") != "text":
+        btype = b.get("type")
+        if btype not in ("text", "table"):
             continue
-        if _is_answer_key_header(b.get("text", "").strip()):
+        text_content = b.get("text", "") or b.get("html", "")
+        clean_text = re.sub(r"<[^>]+>", " ", text_content)
+        if _is_answer_key_header(clean_text.strip()):
             logger.info(
                 "FullPaperBuilder: answer key header at block %d: %r",
-                i, b.get("text", "")[:60],
+                i, clean_text[:60],
             )
             return i
 
@@ -363,9 +366,12 @@ def _find_answer_key_boundary(blocks: list[dict]) -> int:
     tail_start = int(len(blocks) * 0.85)
     for i in range(tail_start, len(blocks)):
         b = blocks[i]
-        if b.get("type") != "text":
+        btype = b.get("type")
+        if btype not in ("text", "table"):
             continue
-        if len(_ANS_ENTRY_RE.findall(b.get("text", ""))) >= 3:
+        text_content = b.get("text", "") or b.get("html", "")
+        clean_text = re.sub(r"<[^>]+>", " ", text_content)
+        if len(_ANS_ENTRY_RE.findall(clean_text)) >= 3:
             logger.info("FullPaperBuilder: answer key detected by density at block %d", i)
             return i
 
@@ -769,9 +775,15 @@ def _parse_answer_key(key_blocks: list[dict]) -> dict[int, str]:
     """
     answer_map: dict[int, str] = {}
     for block in key_blocks:
-        if block.get("type") != "text":
+        btype = block.get("type")
+        if btype not in ("text", "table"):
             continue
-        for q_str, raw_ans in _ANS_ENTRY_RE.findall(block.get("text", "")):
+        
+        text_content = block.get("text", "") or block.get("html", "")
+        # Strip HTML tags so regex matches cleanly
+        clean_text = re.sub(r"<[^>]+>", " ", text_content)
+        
+        for q_str, raw_ans in _ANS_ENTRY_RE.findall(clean_text):
             q_num = int(q_str)
             raw   = raw_ans.strip()
             if q_num not in answer_map and raw:

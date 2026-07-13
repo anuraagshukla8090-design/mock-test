@@ -30,7 +30,7 @@ def test_chemistry():
     print("Dumping output...")
     pipe_result.dump_md(md_writer, "chemistry_sample.md", "images")
     pipe_result.dump_content_list(md_writer, "chemistry_sample_content_list.json", "images")
-    pipe_result.dump_middle_json(md_writer, "chemistry_sample_middle.json", "images")
+    pipe_result.dump_middle_json(md_writer, "chemistry_sample_middle.json")
     
     print("Done! Check output/chemistry_sample")
 
