@@ -21,6 +21,13 @@ class Settings(BaseSettings):
     qwen_api_key: str = ""
     ollama_base_url: str = "http://localhost:11434"
 
+    # ── Question Regeneration LLM ─────────────────────────────────────────────
+    # Independent of the main llm_provider used for metadata generation.
+    # Set REGEN_PROVIDER=groq in .env to use Groq on the demo laptop.
+    regen_provider: str = "ollama"        # "ollama" | "groq"
+    regen_ollama_model: str = "qwen2.5:7b"  # local Ollama model for regeneration
+    regen_groq_model: str = "llama-3.3-70b-versatile"  # Groq model for regeneration
+
     # ── MinerU ────────────────────────────────────────────────────────────────
     # Set MINERU_PYTHON in .env — no default because the path is machine-specific.
     mineru_python: str = ""

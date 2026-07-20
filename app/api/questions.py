@@ -14,6 +14,8 @@ from app.schemas.question import (
     QuestionMetadataUpdate,
     QuestionResponse,
     QuestionStatsResponse,
+    RegenerateDraftResponse,
+    RegenerateSaveRequest,
 )
 
 router = APIRouter(prefix="/api/questions", tags=["questions"])
@@ -165,3 +167,119 @@ def delete_question(
     db.delete(q)
     db.commit()
 
+
+@router.post("/{question_id}/regenerate", response_model=RegenerateDraftResponse)
+async def regenerate_question_draft(
+    question_id: uuid.UUID,
+    provider: str | None = Query(
+        default=None,
+        description="LLM provider for regeneration: 'ollama' or 'groq'. "
+                    "Defaults to the REGEN_PROVIDER setting in .env.",
+    ),
+    db: Session = Depends(get_db),
+):
+    """
+    Generate a new AI variant of an existing question.
+
+    Supports 'ollama' (local) and 'groq' (cloud) providers, selectable
+    per-request via the ?provider= query param. Defaults to the REGEN_PROVIDER
+    setting in .env.
+
+    The regenerated question is NOT saved to the database yet — this endpoint
+    returns a preview draft. Call /regenerate/save to persist it.
+
+    Works for any question type (MCQ, integer, match-the-following).
+    The caller (frontend) is responsible for gating this to text-only questions.
+    """
+    import httpx
+    from app.services.question_regenerator import regenerate_question
+
+    q = db.get(Question, question_id)
+    if not q:
+        raise HTTPException(404, f"Question {question_id} not found.")
+
+    # Validate provider value if explicitly passed
+    if provider and provider not in ("ollama", "groq"):
+        raise HTTPException(400, f"Invalid provider {provider!r}. Choose 'ollama' or 'groq'.")
+
+    try:
+        draft = await regenerate_question(q, provider=provider)  # type: ignore[arg-type]
+    except httpx.ConnectError:
+        raise HTTPException(
+            503,
+            "Could not reach local Ollama. Make sure Ollama is running and the model is pulled.",
+        )
+    except ValueError as exc:
+        # Catches missing API key or bad JSON from LLM
+        raise HTTPException(422, str(exc))
+    except Exception as exc:
+        # Groq API errors etc.
+        raise HTTPException(502, f"LLM provider error: {exc}")
+
+    return RegenerateDraftResponse(
+        original_id=question_id,
+        stem_md=draft["stem_md"],
+        options=draft["options"],
+        answer=draft["answer"],
+        section_type=draft["section_type"],
+        provider_used=draft.get("provider_used", "ollama"),
+    )
+
+
+@router.post("/{question_id}/regenerate/save", response_model=QuestionResponse, status_code=201)
+def save_regenerated_question(
+    question_id: uuid.UUID,
+    body: RegenerateSaveRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Persist an accepted AI-regenerated question draft as a new Question row.
+
+    - Copies all metadata (subject, chapter, topic, difficulty, etc.) from the original.
+    - Sets generation_type="ai_regenerated" and parent_question_id=original.id.
+    - The original question is never modified.
+    """
+    original = db.get(Question, question_id)
+    if not original:
+        raise HTTPException(404, f"Original question {question_id} not found.")
+
+    # Detect if new stem contains LaTeX formulas
+    has_formula = any(
+        marker in body.stem_md
+        for marker in ("$", "\\frac", "\\sqrt", "\\int", "\\sum")
+    )
+
+    new_q = Question(
+        # ── Source (inherit ingestion context but mark as regenerated)
+        ingestion_id=original.ingestion_id,
+        source_pdf=original.source_pdf,
+        source_page=None,
+        question_number=None,
+        # ── Content from the accepted draft
+        stem_md=body.stem_md,
+        options=body.options,
+        answer=body.answer,
+        images=[],          # text-only variant — no images
+        section_type=original.section_type,
+        section_label=original.section_label,
+        # ── Metadata inherited from the original
+        exam_name=original.exam_name,
+        subject=original.subject,
+        chapter=original.chapter,
+        topic=original.topic,
+        subtopic=original.subtopic,
+        difficulty=original.difficulty,
+        question_type=original.question_type,
+        concepts=list(original.concepts or []),
+        has_diagram=False,
+        has_formula=has_formula,
+        # ── Lineage
+        generation_type="ai_regenerated",
+        parent_question_id=original.id,
+        # ── Status
+        status="active",
+    )
+    db.add(new_q)
+    db.commit()
+    db.refresh(new_q)
+    return new_q

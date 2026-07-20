@@ -23,7 +23,7 @@ class OllamaClient:
         if system:
             payload["system"] = system
 
-        async with httpx.AsyncClient(timeout=180.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             response = await client.post(
                 f"{self._base_url}/api/generate",
                 json=payload,
@@ -52,7 +52,7 @@ class OllamaClient:
         if system:
             payload["system"] = system
 
-        async with httpx.AsyncClient(timeout=180.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             response = await client.post(
                 f"{self._base_url}/api/generate",
                 json=payload,
@@ -71,7 +71,7 @@ class OllamaClient:
             f"{prompt}\n\nReturn ONLY a valid JSON object. No markdown, no explanation."
         )
         payload2 = {**payload, "prompt": retry_prompt}
-        async with httpx.AsyncClient(timeout=180.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             response2 = await client.post(
                 f"{self._base_url}/api/generate",
                 json=payload2,
@@ -94,7 +94,14 @@ def _try_parse(text: str) -> dict | None:
     brace_match = re.search(r"\{.*\}", text, re.DOTALL)
     if brace_match:
         text = brace_match.group()
+    # First attempt: parse as-is
     try:
         return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    # Second attempt: repair invalid LaTeX backslash escapes (\mathrm, \frac, etc.)
+    repaired = re.sub(r'\\(?!["\\\'\/bfnrtu])', r'\\\\', text)
+    try:
+        return json.loads(repaired)
     except json.JSONDecodeError:
         return None

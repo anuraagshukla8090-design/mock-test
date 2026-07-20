@@ -10,6 +10,8 @@ export interface QuestionListItem {
   has_formula: boolean
   section_type: string
   status: string
+  generation_type: string
+  parent_question_id: string | null
 }
 
 export interface QuestionImage {
@@ -67,4 +69,19 @@ export interface QuestionFilters {
   search?: string
   skip?: number
   limit?: number
+}
+
+export interface RegenerateDraft {
+  original_id: string
+  stem_md: string
+  options: Record<string, string>
+  answer: string
+  section_type: string
+  provider_used: string
+}
+
+export interface RegenerateSaveData {
+  stem_md: string
+  options: Record<string, string>
+  answer: string
 }

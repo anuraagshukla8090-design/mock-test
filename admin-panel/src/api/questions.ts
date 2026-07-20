@@ -1,5 +1,5 @@
 import api from './client'
-import type { QuestionDetail, QuestionFilters, QuestionListItem, QuestionStats, MetadataUpdate } from '../types/question'
+import type { QuestionDetail, QuestionFilters, QuestionListItem, QuestionStats, MetadataUpdate, RegenerateDraft, RegenerateSaveData } from '../types/question'
 
 export const getStats = () =>
   api.get<QuestionStats>('/questions/stats').then((r) => r.data)
@@ -31,3 +31,12 @@ export const updateStatus = (id: string, newStatus: string) =>
 export const deleteQuestion = (id: string) =>
   api.delete(`/questions/${id}`)
 
+export const regenerateQuestion = (id: string, provider?: 'ollama' | 'groq') =>
+  api.post<RegenerateDraft>(
+    `/questions/${id}/regenerate`,
+    null,
+    provider ? { params: { provider } } : undefined,
+  ).then((r) => r.data)
+
+export const saveRegeneratedQuestion = (id: string, data: RegenerateSaveData) =>
+  api.post<QuestionDetail>(`/questions/${id}/regenerate/save`, data).then((r) => r.data)

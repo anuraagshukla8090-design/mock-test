@@ -88,6 +88,20 @@ class Question(Base):
     # "active" | "archived" | "flagged"
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
 
+    # ── Lineage ───────────────────────────────────────────────────────────────
+    # generation_type: "ingested" (from PDF) | "ai_regenerated" (by LLM variant)
+    generation_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="ingested"
+    )
+    # parent_question_id: FK to the original seed question (NULL for ingested).
+    # ON DELETE SET NULL — regenerated questions survive if their parent is deleted.
+    parent_question_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("questions.id", ondelete="SET NULL"),
+        nullable=True,
+        default=None,
+    )
+
     # ── NOTE: Semantic search (pgvector embedding) is planned for V2. ─────────
     # When implementing: ALTER TABLE questions ADD COLUMN embedding VECTOR(384);
     # No schema changes needed beyond that single column addition.

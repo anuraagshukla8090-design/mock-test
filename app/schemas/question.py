@@ -29,6 +29,8 @@ class QuestionResponse(BaseModel):
     has_diagram: bool
     has_formula: bool
     status: str
+    generation_type: str = "ingested"
+    parent_question_id: uuid.UUID | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -46,6 +48,8 @@ class QuestionListItem(BaseModel):
     has_formula: bool
     section_type: str
     status: str
+    generation_type: str = "ingested"
+    parent_question_id: uuid.UUID | None = None
 
     model_config = {"from_attributes": True}
 
@@ -70,3 +74,20 @@ class QuestionStatsResponse(BaseModel):
     by_difficulty: dict[str, int]
     by_chapter: dict[str, int]
     by_section_type: dict[str, int]
+
+
+class RegenerateDraftResponse(BaseModel):
+    """Returned by POST /api/questions/{id}/regenerate — not yet persisted."""
+    original_id: uuid.UUID
+    stem_md: str
+    options: dict
+    answer: str
+    section_type: str
+    provider_used: str = "ollama"  # "ollama" | "groq"
+
+
+class RegenerateSaveRequest(BaseModel):
+    """Body for POST /api/questions/{id}/regenerate/save — teacher accepted the draft."""
+    stem_md: str
+    options: dict
+    answer: str

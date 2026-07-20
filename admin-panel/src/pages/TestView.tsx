@@ -5,10 +5,11 @@ import {
   ChevronLeft, ChevronRight, BookOpen, Tag, BarChart2,
   Hash, Layers, Zap, Image, FunctionSquare, CheckCircle2,
   XCircle, Circle, Bookmark, ExternalLink, Loader2, AlertCircle,
-  GraduationCap, FlaskConical, Trash2,
+  GraduationCap, FlaskConical, Trash2, Sparkles, RefreshCw, X,
+  GitBranch,
 } from 'lucide-react'
-import { getQuestions, getQuestion, deleteQuestion } from '../api/questions'
-import type { QuestionDetail, QuestionFilters } from '../types/question'
+import { getQuestions, getQuestion, deleteQuestion, regenerateQuestion, saveRegeneratedQuestion } from '../api/questions'
+import type { QuestionDetail, QuestionFilters, RegenerateDraft } from '../types/question'
 import RenderedContent from '../components/question/RenderedContent'
 
 /* ────────────────────────────────────────────────────────────
@@ -193,12 +194,273 @@ export default function TestView() {
     deleteMutation.mutate(question.id)
   }
 
+  // ── Regeneration state ───────────────────────────────────────────────────
+  const [regenModalOpen, setRegenModalOpen] = useState(false)
+  const [regenDraft, setRegenDraft] = useState<RegenerateDraft | null>(null)
+  const [regenError, setRegenError] = useState<string | null>(null)
+  const [regenProvider, setRegenProvider] = useState<'ollama' | 'groq'>('ollama')
+
+  const regenMutation = useMutation({
+    mutationFn: ({ id, provider }: { id: string; provider: 'ollama' | 'groq' }) =>
+      regenerateQuestion(id, provider),
+    onSuccess: (draft) => {
+      setRegenDraft(draft)
+      setRegenError(null)
+    },
+    onError: (err: Error) => {
+      setRegenError(err.message || 'LLM failed to generate. Try again.')
+    },
+  })
+
+  const saveMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: { stem_md: string; options: Record<string, string>; answer: string } }) =>
+      saveRegeneratedQuestion(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['questions-list-for-testview'] })
+      queryClient.invalidateQueries({ queryKey: ['questions'] })
+      setRegenModalOpen(false)
+      setRegenDraft(null)
+    },
+  })
+
+  const handleOpenRegen = () => {
+    if (!question) return
+    setRegenDraft(null)
+    setRegenError(null)
+    setRegenModalOpen(true)
+    regenMutation.mutate({ id: question.id, provider: regenProvider })
+  }
+
+  const handleRetryRegen = () => {
+    if (!question) return
+    setRegenError(null)
+    regenMutation.mutate({ id: question.id, provider: regenProvider })
+  }
+
+  const handleAcceptRegen = () => {
+    if (!question || !regenDraft) return
+    saveMutation.mutate({
+      id: question.id,
+      data: { stem_md: regenDraft.stem_md, options: regenDraft.options as Record<string, string>, answer: regenDraft.answer },
+    })
+  }
+
+  const canRegenerate = question && !question.has_diagram && question.images.length === 0
+
   const isMCQ = question?.section_type === 'mcq'
   const optionEntries = Object.entries(question?.options ?? {})
 
   /* ── Render ─────────────────────────────────────────────────────── */
   return (
     <div className="h-screen flex flex-col bg-slate-50 overflow-hidden">
+
+      {/* ── Regeneration Modal ─────────────────────────────────────── */}
+      {regenModalOpen && question && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col overflow-hidden">
+            {/* Modal header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 flex-shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-violet-100 flex items-center justify-center">
+                  <Sparkles size={16} className="text-violet-600" />
+                </div>
+                <div>
+                  <h2 className="text-base font-semibold text-gray-800">AI Question Regeneration</h2>
+                  <p className="text-xs text-gray-500">Same concept · Different values</p>
+                </div>
+              </div>
+
+              {/* Provider toggle */}
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-gray-400 font-medium">Provider</span>
+                <div className="flex items-center bg-gray-100 rounded-lg p-0.5 gap-0.5">
+                  <button
+                    onClick={() => {
+                      if (regenProvider !== 'ollama') {
+                        setRegenProvider('ollama')
+                        setRegenDraft(null)
+                        setRegenError(null)
+                      }
+                    }}
+                    disabled={regenMutation.isPending}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                      regenProvider === 'ollama'
+                        ? 'bg-white text-gray-800 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    🖥 Ollama
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (regenProvider !== 'groq') {
+                        setRegenProvider('groq')
+                        setRegenDraft(null)
+                        setRegenError(null)
+                      }
+                    }}
+                    disabled={regenMutation.isPending}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                      regenProvider === 'groq'
+                        ? 'bg-white text-gray-800 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    ⚡ Groq
+                  </button>
+                </div>
+
+                <button
+                  onClick={() => { setRegenModalOpen(false); setRegenDraft(null); setRegenError(null) }}
+                  className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal body — side by side */}
+            <div className="flex-1 overflow-hidden grid grid-cols-2 divide-x divide-gray-200">
+              {/* Left: Original */}
+              <div className="overflow-y-auto p-6 space-y-4">
+                <p className="text-[10px] uppercase tracking-widest font-semibold text-gray-400 mb-3">Original Question</p>
+                <div className="bg-slate-50 rounded-xl border border-gray-200 p-4">
+                  <RenderedContent content={question.stem_md} />
+                </div>
+                {Object.entries(question.options).length > 0 && (
+                  <div className="space-y-2">
+                    {Object.entries(question.options).map(([key, val]) => (
+                      <div key={key} className={`flex gap-3 p-3 rounded-lg border text-sm ${
+                        key === question.answer
+                          ? 'border-emerald-300 bg-emerald-50'
+                          : 'border-gray-200 bg-white'
+                      }`}>
+                        <span className={`font-bold flex-shrink-0 w-5 ${
+                          key === question.answer ? 'text-emerald-600' : 'text-gray-400'
+                        }`}>{key}</span>
+                        <RenderedContent content={val} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {question.section_type !== 'mcq' && (
+                  <p className="text-sm text-gray-600">Answer: <span className="font-mono font-bold">{question.answer}</span></p>
+                )}
+              </div>
+
+              {/* Right: Regenerated draft */}
+              <div className="overflow-y-auto p-6 space-y-4 bg-violet-50/30">
+                <p className="text-[10px] uppercase tracking-widest font-semibold text-violet-500 mb-3 flex items-center gap-1.5">
+                  <Sparkles size={10} /> AI Variant
+                </p>
+
+                {/* Loading state */}
+                {regenMutation.isPending && (
+                  <div className="flex flex-col items-center justify-center h-48 gap-4">
+                    <div className="relative">
+                      <div className="w-12 h-12 rounded-full border-4 border-violet-200 border-t-violet-600 animate-spin" />
+                      <Sparkles size={14} className="text-violet-600 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
+                    </div>
+                    <p className="text-sm text-violet-600 font-medium">Generating variant…</p>
+                    <p className="text-xs text-gray-400">
+                      {regenProvider === 'groq'
+                        ? 'Calling Groq API… usually fast!'
+                        : 'Ollama is thinking. This may take 15–30 seconds.'}
+                    </p>
+                  </div>
+                )}
+
+                {/* Error state */}
+                {regenError && (
+                  <div className="flex flex-col items-center justify-center h-48 gap-4">
+                    <AlertCircle size={32} className="text-rose-400" />
+                    <p className="text-sm text-rose-600 font-medium text-center max-w-xs">{regenError}</p>
+                    <button
+                      onClick={handleRetryRegen}
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg bg-rose-50 border border-rose-200 text-rose-600 text-sm hover:bg-rose-100 transition"
+                    >
+                      <RefreshCw size={13} /> Retry
+                    </button>
+                  </div>
+                )}
+
+                {/* Draft content */}
+                {regenDraft && !regenMutation.isPending && (
+                  <>
+                    <div className="bg-white rounded-xl border border-violet-200 p-4 shadow-sm">
+                      <RenderedContent content={regenDraft.stem_md} />
+                    </div>
+                    {Object.entries(regenDraft.options).length > 0 && (
+                      <div className="space-y-2">
+                        {Object.entries(regenDraft.options).map(([key, val]) => (
+                          <div key={key} className={`flex gap-3 p-3 rounded-lg border text-sm ${
+                            key === regenDraft.answer
+                              ? 'border-emerald-300 bg-emerald-50'
+                              : 'border-gray-200 bg-white'
+                          }`}>
+                            <span className={`font-bold flex-shrink-0 w-5 ${
+                              key === regenDraft.answer ? 'text-emerald-600' : 'text-gray-400'
+                            }`}>{key}</span>
+                            <RenderedContent content={val} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {regenDraft.section_type !== 'mcq' && (
+                      <p className="text-sm text-gray-600">Answer: <span className="font-mono font-bold">{regenDraft.answer}</span></p>
+                    )}
+                    <button
+                      onClick={handleRetryRegen}
+                      className="flex items-center gap-1.5 text-xs text-violet-500 hover:text-violet-700 transition mt-2"
+                    >
+                      <RefreshCw size={11} /> Generate another variant
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Modal footer */}
+            <div className="border-t border-gray-200 flex-shrink-0">
+              {/* Verify warning — shown once a draft is ready */}
+              {regenDraft && !regenMutation.isPending && (
+                <div className="px-6 py-2.5 bg-amber-50 border-b border-amber-200 flex items-start gap-2">
+                  <AlertCircle size={14} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-amber-700 leading-snug">
+                    <span className="font-semibold">Always verify before saving:</span> Check that the
+                    answer is mathematically correct, options are distinct, and all formulas/compounds
+                    are valid before accepting.
+                  </p>
+                </div>
+              )}
+              <div className="flex items-center justify-between px-6 py-4 bg-gray-50">
+                <button
+                  onClick={() => { setRegenModalOpen(false); setRegenDraft(null); setRegenError(null) }}
+                  className="px-5 py-2 rounded-xl border border-gray-300 text-gray-600 text-sm font-medium hover:bg-gray-100 transition"
+                >
+                  Discard
+                </button>
+                <div className="flex items-center gap-3">
+                  {saveMutation.isError && (
+                    <p className="text-xs text-rose-500">Save failed. Try again.</p>
+                  )}
+                  <button
+                    onClick={handleAcceptRegen}
+                    disabled={!regenDraft || saveMutation.isPending || regenMutation.isPending}
+                    className="flex items-center gap-2 px-6 py-2 rounded-xl bg-violet-600 text-white text-sm font-semibold
+                      hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed transition shadow-sm"
+                  >
+                    {saveMutation.isPending
+                      ? <Loader2 size={14} className="animate-spin" />
+                      : <CheckCircle2 size={14} />}
+                    Accept &amp; Save as New Question
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Top bar ───────────────────────────────────────────────── */}
       <header className="flex-shrink-0 bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
@@ -540,7 +802,31 @@ export default function TestView() {
             </div>
 
             {/* ── Delete question button ───────────────────────── */}
-            <div className="px-4 py-4 border-t border-gray-200">
+            <div className="px-4 py-4 border-t border-gray-200 space-y-2">
+              {/* Regenerate button — hidden for diagram questions */}
+              {canRegenerate && (
+                <button
+                  onClick={handleOpenRegen}
+                  disabled={regenMutation.isPending}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg
+                    border border-violet-200 text-violet-600 text-xs font-medium
+                    hover:bg-violet-50 hover:border-violet-400
+                    disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  title="Generate a new AI variant of this question (text-only)"
+                >
+                  <Sparkles size={13} />
+                  AI Regenerate
+                </button>
+              )}
+
+              {/* Lineage badge for AI-regenerated questions */}
+              {question.generation_type === 'ai_regenerated' && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-50 border border-violet-100">
+                  <GitBranch size={11} className="text-violet-400" />
+                  <span className="text-[11px] text-violet-500 font-medium">AI Regenerated</span>
+                </div>
+              )}
+
               <button
                 onClick={handleDeleteQuestion}
                 disabled={deleteMutation.isPending}

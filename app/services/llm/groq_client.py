@@ -69,7 +69,24 @@ def _try_parse(text: str) -> dict | None:
     brace_match = re.search(r"\{.*\}", text, re.DOTALL)
     if brace_match:
         text = brace_match.group()
+    # First attempt: parse as-is
     try:
         return json.loads(text)
     except json.JSONDecodeError:
+        pass
+    # Second attempt: repair invalid backslash escapes (LaTeX: \mathrm, \cdot, etc.)
+    # JSON only allows: \" \\ \/ \b \f \n \r \t \uXXXX
+    repaired = _fix_invalid_escapes(text)
+    try:
+        return json.loads(repaired)
+    except json.JSONDecodeError:
         return None
+
+
+def _fix_invalid_escapes(text: str) -> str:
+    """
+    Replace bare LaTeX backslashes (e.g. \\mathrm, \\frac) that are invalid
+    JSON escape sequences with properly doubled backslashes.
+    Valid JSON escapes: \" \\ \/ \b \f \n \r \t \\uXXXX
+    """
+    return re.sub(r'\\(?!["\\\'\/bfnrtu])', r'\\\\', text)
