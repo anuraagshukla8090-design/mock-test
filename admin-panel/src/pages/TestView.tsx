@@ -198,7 +198,10 @@ export default function TestView() {
   const [regenModalOpen, setRegenModalOpen] = useState(false)
   const [regenDraft, setRegenDraft] = useState<RegenerateDraft | null>(null)
   const [regenError, setRegenError] = useState<string | null>(null)
-  const [regenProvider, setRegenProvider] = useState<'ollama' | 'groq'>('ollama')
+  // Persist last-used provider so teacher doesn't have to re-select each time
+  const [regenProvider, setRegenProvider] = useState<'ollama' | 'groq'>(
+    () => (localStorage.getItem('regenProvider') as 'ollama' | 'groq') || 'ollama'
+  )
 
   const regenMutation = useMutation({
     mutationFn: ({ id, provider }: { id: string; provider: 'ollama' | 'groq' }) =>
@@ -225,17 +228,19 @@ export default function TestView() {
 
   const handleOpenRegen = () => {
     if (!question) return
+    // Open blank — teacher selects provider and clicks Generate themselves
     setRegenDraft(null)
     setRegenError(null)
     setRegenModalOpen(true)
-    regenMutation.mutate({ id: question.id, provider: regenProvider })
   }
 
-  const handleRetryRegen = () => {
+  const handleGenerate = (provider: 'ollama' | 'groq' = regenProvider) => {
     if (!question) return
     setRegenError(null)
-    regenMutation.mutate({ id: question.id, provider: regenProvider })
+    regenMutation.mutate({ id: question.id, provider })
   }
+
+  const handleRetryRegen = () => handleGenerate()
 
   const handleAcceptRegen = () => {
     if (!question || !regenDraft) return
@@ -274,40 +279,31 @@ export default function TestView() {
               <div className="flex items-center gap-3">
                 <span className="text-xs text-gray-400 font-medium">Provider</span>
                 <div className="flex items-center bg-gray-100 rounded-lg p-0.5 gap-0.5">
-                  <button
-                    onClick={() => {
-                      if (regenProvider !== 'ollama') {
-                        setRegenProvider('ollama')
-                        setRegenDraft(null)
+                  {(['ollama', 'groq'] as const).map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => {
+                        if (regenProvider === p) return
+                        localStorage.setItem('regenProvider', p)
+                        setRegenProvider(p)
                         setRegenError(null)
-                      }
-                    }}
-                    disabled={regenMutation.isPending}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
-                      regenProvider === 'ollama'
-                        ? 'bg-white text-gray-800 shadow-sm'
-                        : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    🖥 Ollama
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (regenProvider !== 'groq') {
-                        setRegenProvider('groq')
-                        setRegenDraft(null)
-                        setRegenError(null)
-                      }
-                    }}
-                    disabled={regenMutation.isPending}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
-                      regenProvider === 'groq'
-                        ? 'bg-white text-gray-800 shadow-sm'
-                        : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    ⚡ Groq
-                  </button>
+                        // If a draft already exists, auto-switch and re-generate
+                        // If blank (nothing generated yet), just update selection
+                        if (regenDraft || regenMutation.isPending) {
+                          setRegenDraft(null)
+                          regenMutation.mutate({ id: question.id, provider: p })
+                        }
+                      }}
+                      disabled={regenMutation.isPending}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                        regenProvider === p
+                          ? 'bg-white text-gray-800 shadow-sm'
+                          : 'text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      {p === 'ollama' ? '🖥 Ollama' : '⚡ Groq'}
+                    </button>
+                  ))}
                 </div>
 
                 <button
@@ -353,6 +349,28 @@ export default function TestView() {
                 <p className="text-[10px] uppercase tracking-widest font-semibold text-violet-500 mb-3 flex items-center gap-1.5">
                   <Sparkles size={10} /> AI Variant
                 </p>
+
+                {/* Idle state — no generation started yet */}
+                {!regenMutation.isPending && !regenDraft && !regenError && (
+                  <div className="flex flex-col items-center justify-center h-48 gap-5">
+                    <div className="w-14 h-14 rounded-2xl bg-violet-100 flex items-center justify-center">
+                      <Sparkles size={26} className="text-violet-500" />
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm font-semibold text-gray-700">Ready to generate</p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        Provider: <span className="font-medium text-gray-600">{regenProvider === 'ollama' ? '🖥 Ollama (local)' : '⚡ Groq (cloud)'}</span>
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleGenerate()}
+                      className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-violet-600 text-white text-sm font-semibold
+                        hover:bg-violet-700 active:scale-95 transition shadow-sm"
+                    >
+                      <Sparkles size={14} /> Generate Variant
+                    </button>
+                  </div>
+                )}
 
                 {/* Loading state */}
                 {regenMutation.isPending && (

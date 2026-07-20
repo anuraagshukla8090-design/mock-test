@@ -5,7 +5,7 @@ import {
   CheckCircle2, XCircle, RefreshCw, Lock, Unlock,
   ChevronLeft, AlertCircle, Loader2, Download, FileText,
   BookOpen, BarChart2, Layers, ArrowRight, CheckCheck,
-  Printer, Eye, EyeOff,
+  Printer, Eye, EyeOff, Sparkles,
 } from 'lucide-react'
 import {
   getPaper,
@@ -16,6 +16,7 @@ import {
   approvePaper,
   exportPaper,
 } from '../api/papers'
+import { regenerateQuestion, saveRegeneratedQuestion } from '../api/questions'
 import type { Paper, PaperQuestionItem } from '../types/paper'
 import type { QuestionDetail } from '../types/question'
 import RenderedContent from '../components/question/RenderedContent'
@@ -121,6 +122,182 @@ function printPaper(paper: Paper, answerKeyOnly = false) {
   setTimeout(() => win.print(), 800)
 }
 
+// ── AI Regeneration panel (inline, below question) ──────────────────
+
+function AIRegenPanel({
+  questionId, paperId, pqId, onSwap, onCancel,
+}: {
+  questionId: string
+  paperId: string
+  pqId: string
+  onSwap: () => void
+  onCancel: () => void
+}) {
+  const qc = useQueryClient()
+  const [provider, setProvider] = useState<'ollama' | 'groq'>(
+    () => (localStorage.getItem('regenProvider') as 'ollama' | 'groq') || 'ollama'
+  )
+  const [draft, setDraft] = useState<{ stem_md: string; options: Record<string, string>; answer: string; section_type: string } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const regenMut = useMutation({
+    mutationFn: (p: 'ollama' | 'groq') => regenerateQuestion(questionId, p),
+    onSuccess: (d) => { setDraft(d as typeof draft); setError(null) },
+    onError: (e: Error) => setError(e.message || 'Generation failed. Try again.'),
+  })
+
+  const saveMut = useMutation({
+    mutationFn: async () => {
+      if (!draft) throw new Error('No draft')
+      // 1. Save as a new question in the DB
+      const saved = await saveRegeneratedQuestion(questionId, {
+        stem_md: draft.stem_md,
+        options: draft.options,
+        answer: draft.answer,
+      })
+      // 2. Swap it into the paper slot
+      await swapQuestion(paperId, pqId, (saved as { id: string }).id)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['paper', paperId] })
+      onSwap()
+    },
+    onError: (e: Error) => setError(e.message || 'Save failed.'),
+  })
+
+  const handleGenerate = (p: 'ollama' | 'groq' = provider) => {
+    localStorage.setItem('regenProvider', p)
+    setError(null)
+    regenMut.mutate(p)
+  }
+
+  const switchProvider = (p: 'ollama' | 'groq') => {
+    if (p === provider) return
+    setProvider(p)
+    setError(null)
+    // If a draft already exists, auto-generate with new provider
+    if (draft || regenMut.isPending) {
+      setDraft(null)
+      handleGenerate(p)
+    }
+  }
+
+  const optionEntries = Object.entries(draft?.options ?? {})
+
+  return (
+    <div className="border-t border-gray-100 bg-violet-50/40 p-4 space-y-4">
+      {/* Panel header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Sparkles size={14} className="text-violet-500" />
+          <span className="text-xs font-semibold text-violet-700">AI Regeneration</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {/* Provider toggle */}
+          <div className="flex items-center bg-white border border-gray-200 rounded-lg p-0.5 gap-0.5">
+            {(['ollama', 'groq'] as const).map((p) => (
+              <button
+                key={p}
+                onClick={() => switchProvider(p)}
+                disabled={regenMut.isPending || saveMut.isPending}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all ${
+                  provider === p ? 'bg-violet-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                {p === 'ollama' ? '🖥 Ollama' : '⚡ Groq'}
+              </button>
+            ))}
+          </div>
+          <button onClick={onCancel} className="text-xs text-gray-400 hover:text-gray-600 transition">Cancel</button>
+        </div>
+      </div>
+
+      {/* Idle: no generation started */}
+      {!regenMut.isPending && !draft && !error && (
+        <div className="flex flex-col items-center gap-3 py-4">
+          <p className="text-xs text-gray-500">Select provider and generate a variant of this question.</p>
+          <button
+            onClick={() => handleGenerate()}
+            className="flex items-center gap-2 px-5 py-2 rounded-xl bg-violet-600 text-white text-xs font-semibold hover:bg-violet-700 transition shadow-sm"
+          >
+            <Sparkles size={12} /> Generate Variant
+          </button>
+        </div>
+      )}
+
+      {/* Loading */}
+      {regenMut.isPending && (
+        <div className="flex items-center gap-3 py-3 justify-center">
+          <Loader2 size={16} className="animate-spin text-violet-500" />
+          <span className="text-xs text-violet-600 font-medium">
+            {provider === 'groq' ? 'Calling Groq… usually fast!' : 'Ollama thinking… may take 30s+'}
+          </span>
+        </div>
+      )}
+
+      {/* Error */}
+      {error && !regenMut.isPending && (
+        <div className="flex items-center gap-3 bg-rose-50 border border-rose-200 rounded-xl p-3">
+          <AlertCircle size={14} className="text-rose-500 flex-shrink-0" />
+          <p className="text-xs text-rose-600 flex-1">{error}</p>
+          <button
+            onClick={() => handleGenerate()}
+            className="text-xs text-rose-600 font-semibold hover:underline"
+          >Retry</button>
+        </div>
+      )}
+
+      {/* Draft preview */}
+      {draft && !regenMut.isPending && (
+        <div className="space-y-3">
+          {/* Verify warning */}
+          <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl p-2.5">
+            <AlertCircle size={12} className="text-amber-500 flex-shrink-0 mt-0.5" />
+            <p className="text-[11px] text-amber-700 leading-snug">
+              <span className="font-semibold">Verify before swapping:</span> Check the answer is correct and formulas are valid.
+            </p>
+          </div>
+          <div className="bg-white rounded-xl border border-violet-200 p-3 text-sm">
+            <RenderedContent content={draft.stem_md} />
+          </div>
+          {optionEntries.length > 0 && (
+            <div className="space-y-1.5">
+              {optionEntries.map(([key, val]) => (
+                <div key={key} className={`flex gap-2 px-3 py-2 rounded-lg border text-xs ${
+                  key === draft.answer ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-gray-200 bg-white text-gray-700'
+                }`}>
+                  <span className={`font-bold flex-shrink-0 w-4 ${key === draft.answer ? 'text-emerald-600' : 'text-gray-400'}`}>{key}</span>
+                  <RenderedContent content={val} />
+                </div>
+              ))}
+            </div>
+          )}
+          {draft.section_type !== 'mcq' && (
+            <p className="text-xs text-gray-600">Answer: <span className="font-mono font-bold">{draft.answer}</span></p>
+          )}
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              onClick={() => { setDraft(null); handleGenerate() }}
+              className="flex items-center gap-1 text-[11px] text-violet-500 hover:text-violet-700 transition"
+            >
+              <RefreshCw size={10} /> Generate another
+            </button>
+            <div className="flex-1" />
+            <button
+              onClick={() => saveMut.mutate()}
+              disabled={saveMut.isPending}
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-semibold hover:bg-violet-700 disabled:opacity-50 transition"
+            >
+              {saveMut.isPending ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
+              Accept &amp; Swap into Paper
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Alternative question picker ───────────────────────────────────────────
 
 function AlternativePicker({
@@ -200,7 +377,10 @@ function QuestionCard({
 }) {
   const qc = useQueryClient()
   const [showAlt, setShowAlt] = useState(false)
+  const [showAIRegen, setShowAIRegen] = useState(false)
   const q = pq.question
+  // Hide AI regen button for questions with images (V1 rule)
+  const hasImages = q.images && q.images.length > 0
 
   const lockMut = useMutation({
     mutationFn: () => lockQuestion(paperId, pq.id),
@@ -247,10 +427,23 @@ function QuestionCard({
 
         {/* Actions */}
         <div className="flex items-center gap-1">
-          {/* Regenerate */}
+          {/* AI Regenerate (hidden for questions with images) */}
+          {!hasImages && (
+            <button
+              onClick={() => { setShowAIRegen(!showAIRegen); setShowAlt(false) }}
+              title="AI Regenerate question"
+              className={`p-2 rounded-lg text-sm transition ${
+                showAIRegen ? 'bg-violet-100 text-violet-700' : 'text-gray-400 hover:bg-violet-50 hover:text-violet-600'
+              }`}
+            >
+              <Sparkles size={15} />
+            </button>
+          )}
+
+          {/* Swap with alternative */}
           <button
-            onClick={() => setShowAlt(!showAlt)}
-            title="Regenerate (swap with alternative)"
+            onClick={() => { setShowAlt(!showAlt); setShowAIRegen(false) }}
+            title="Swap with alternative from question bank"
             className={`p-2 rounded-lg text-sm transition ${
               showAlt ? 'bg-indigo-100 text-indigo-700' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700'
             }`}
@@ -349,6 +542,17 @@ function QuestionCard({
           </div>
         )}
       </div>
+
+      {/* AI Regen panel */}
+      {showAIRegen && (
+        <AIRegenPanel
+          questionId={q.id}
+          paperId={paperId}
+          pqId={pq.id}
+          onSwap={() => setShowAIRegen(false)}
+          onCancel={() => setShowAIRegen(false)}
+        />
+      )}
 
       {/* Alternative picker */}
       {showAlt && (
