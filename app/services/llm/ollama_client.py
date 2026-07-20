@@ -94,14 +94,59 @@ def _try_parse(text: str) -> dict | None:
     brace_match = re.search(r"\{.*\}", text, re.DOTALL)
     if brace_match:
         text = brace_match.group()
-    # First attempt: parse as-is
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    # Second attempt: repair invalid LaTeX backslash escapes (\mathrm, \frac, etc.)
-    repaired = re.sub(r'\\(?!["\\\'\/bfnrtu])', r'\\\\', text)
+    # ALWAYS repair LaTeX backslashes BEFORE parsing.
+    # \text, \frac, \nabla, \rho, \beta start with valid JSON escapes (\t, \f, \n, \r, \b)
+    # that json.loads() silently consumes — so waiting for JSONDecodeError is too late.
+    repaired = _fix_invalid_escapes(text)
     try:
         return json.loads(repaired)
     except json.JSONDecodeError:
+        pass
+    # Fallback: try the original text as-is (in case repair broke something)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
         return None
+
+
+def _fix_invalid_escapes(text: str) -> str:
+    """
+    Repair backslash escape sequences in a raw LLM JSON string.
+
+    LLMs write LaTeX like \\text{m}, \\frac{a}{b}, \\theta inside JSON strings
+    without doubling the backslash. This causes:
+      - \\text  -> tab + 'ext'         (\\t = tab in JSON)
+      - \\frac  -> form-feed + 'rac'   (\\f = form-feed in JSON)
+      - \\nabla -> newline + 'abla'    (\\n = newline in JSON)
+      - \\beta  -> backspace + 'eta'   (\\b = backspace in JSON)
+      - \\rho   -> CR + 'ho'           (\\r = carriage-return in JSON)
+
+    Strategy:
+      - Always keep \\" and \\\\ (mandatory JSON escapes)
+      - Keep \\uXXXX only when followed by exactly 4 hex digits
+      - Keep \\b \\f \\n \\r \\t ONLY when NOT followed by a letter
+        (real whitespace escapes are standalone; LaTeX commands have letters after)
+      - Double-escape everything else
+    """
+    def _replacer(m: re.Match) -> str:
+        char = m.group(1)
+        pos = m.end()
+        next_ch = text[pos] if pos < len(text) else ""
+
+        # Always keep \" and \\
+        if char in ('"', '\\', '/'):
+            return m.group(0)
+
+        # Keep \uXXXX only when followed by 4 hex digits
+        if char == 'u' and re.match(r'[0-9a-fA-F]{4}', text[pos:pos + 4]):
+            return m.group(0)
+
+        # Keep \b \f \n \r \t as real JSON escapes ONLY when NOT followed by a letter.
+        # \text, \frac, \theta, \rho, \nabla, \beta all have a letter after the char.
+        if char in ('b', 'f', 'n', 'r', 't') and not next_ch.isalpha():
+            return m.group(0)
+
+        # Double the backslash so JSON parses it as a literal backslash
+        return '\\\\' + char
+
+    return re.sub(r'\\(.)', _replacer, text)

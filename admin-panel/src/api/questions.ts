@@ -35,7 +35,12 @@ export const regenerateQuestion = (id: string, provider?: 'ollama' | 'groq') =>
   api.post<RegenerateDraft>(
     `/questions/${id}/regenerate`,
     null,
-    provider ? { params: { provider } } : undefined,
+    {
+      // Ollama can take 2-4 min on heavy equation questions; Groq is fast but
+      // we give the same generous budget. Default axios timeout is 30s.
+      timeout: 300_000,
+      ...(provider ? { params: { provider } } : {}),
+    },
   ).then((r) => r.data)
 
 export const saveRegeneratedQuestion = (id: string, data: RegenerateSaveData) =>

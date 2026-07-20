@@ -9,6 +9,7 @@ level, and question structure.
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING, Literal
 
 from app.config import settings
@@ -72,7 +73,19 @@ FORMATTING:
   - Do NOT start the stem with a question number (e.g., no "54." or "Q1.").
   - Do NOT add explanation text outside the JSON.
 
-OUTPUT FORMAT — return ONLY this JSON object, nothing else:
+CRITICAL JSON RULE \u2014 LaTeX backslashes MUST be doubled in JSON strings:
+  - Write \\\\frac{a}{b}    NOT \\frac{a}{b}
+  - Write \\\\text{m/s}     NOT \\text{m/s}
+  - Write \\\\theta          NOT \\theta
+  - Write \\\\mathrm{kg}    NOT \\mathrm{kg}
+  - Write \\\\times          NOT \\times
+  - Write \\\\rho            NOT \\rho
+  - Write \\\\beta           NOT \\beta
+  - Write \\\\nabla          NOT \\nabla
+  In JSON, a single backslash (\\) is an escape character. Every LaTeX backslash
+  must be written as \\\\\\\\ so it appears as \\\\ in the final string.
+
+OUTPUT FORMAT \u2014 return ONLY this JSON object, nothing else:
 {
   "reasoning": "<your step-by-step solution here>",
   "stem_md": "<question text with LaTeX>",
@@ -230,10 +243,75 @@ async def regenerate_question(
     # We don't persist or show it to the teacher.
     result.pop("reasoning", None)
 
+    # Post-process: wrap bare LaTeX commands in $...$ so the renderer can display them.
+    stem = _wrap_bare_latex(str(result.get("stem_md", "")).strip())
+    raw_options = result.get("options") or {}
+    fixed_options = {k: _wrap_bare_latex(str(v)) for k, v in raw_options.items()}
+    answer = str(result.get("answer", "")).strip()
+
     return {
-        "stem_md": str(result.get("stem_md", "")).strip(),
-        "options": result.get("options") or {},
-        "answer": str(result.get("answer", "")).strip(),
+        "stem_md": stem,
+        "options": fixed_options,
+        "answer": answer,
         "section_type": question.section_type,
         "provider_used": effective_provider,
     }
+
+
+# Regex to match bare LaTeX commands outside $...$ delimiters.
+# Matches: \command optionally followed by {arg}, ^{sup}, _{sub}, or single digit sup/sub.
+_BARE_LATEX_RE = re.compile(
+    r"(\\(?:text|frac|dfrac|mathrm|mathbf|mathit|sqrt|times|div|cdot|pm|mp"
+    r"|alpha|beta|gamma|delta|theta|phi|psi|omega|lambda|mu|nu|rho"
+    r"|sigma|tau|pi|epsilon|zeta|eta|kappa|xi|chi"
+    r"|Delta|Gamma|Sigma|Omega|Lambda|Pi|Theta|Phi|Psi"
+    r"|nabla|infty|partial|hbar"
+    r"|int|oint|sum|prod|lim|log|ln|sin|cos|tan|cot|sec|csc"
+    r"|vec|hat|bar|dot|ddot|tilde|overline|underline"
+    r"|rightarrow|leftarrow|Rightarrow|Leftarrow|leftrightarrow"
+    r"|le|ge|neq|approx|equiv|propto|sim|simeq|cong"
+    r"|circ|bullet|star|dagger|perp|parallel"
+    r"|left|right|big|Big|bigg|Bigg)"
+    r"(?:\{[^}]*\})*"          # zero or more {braced args}
+    r"(?:[\^_]\{[^}]*\})*"    # zero or more ^{sup} or _{sub}
+    r"(?:[\^_][0-9])*"         # zero or more ^2 _1 (bare digit)
+    r")"
+)
+
+
+def _wrap_bare_latex(text: str) -> str:
+    """
+    Wrap bare LaTeX commands not inside $...$ with $ delimiters.
+
+    Strategy: split on existing $ delimiters; segments at even indices are
+    outside math mode and may contain unwrapped LaTeX commands.
+
+    Example: '3.75 \\text{ m/s}^2'  ->  '3.75 $\\text{ m/s}^2$'
+    Unchanged: '$\\frac{a}{b}$'       ->  '$\\frac{a}{b}$'
+    Unchanged: 'plain text'           ->  'plain text'
+    """
+    if not text or "\\" not in text:
+        return text
+
+    # Split on $ so we can identify math vs. non-math segments.
+    # Even-indexed parts are outside $, odd-indexed are inside $.
+    parts = text.split("$")
+    result: list[str] = []
+    for idx, part in enumerate(parts):
+        if idx % 2 == 1:
+            # Already inside $...$  — restore delimiter and leave as-is
+            result.append("$" + part + "$")
+        else:
+            # Outside $...$  — wrap any bare \command sequences
+            wrapped = _BARE_LATEX_RE.sub(lambda m: "$" + m.group(0) + "$", part)
+            result.append(wrapped)
+
+    # The split/join dance adds an extra trailing $ for each pair;
+    # a string with N dollar signs produces N+1 parts, so rejoining
+    # with the above logic is correct as long as $ count is even.
+    # If odd (malformed), just return original to avoid corruption.
+    dollar_count = text.count("$")
+    if dollar_count % 2 != 0:
+        return text
+
+    return "".join(result)
